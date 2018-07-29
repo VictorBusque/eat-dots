@@ -1,17 +1,24 @@
 var initial_pos = [300,200];
-var game_speed = 1;
+var original_game_speed = 1;
+var game_speed = original_game_speed;
 var board = [];
 var aliment_ratio = 0.0025;
-var mortal_aliment_ratio =  0.00025;
+var mortal_aliment_ratio = 0.000175;
 var margin = 150;
 
 var player;
 var cam;
 
+var division_factor = 4;
+
+var p_original_size = 10;
+var p_augmenting_factor = 0.5;
+
+var p_positive_aliment = 0.7;
 var scaling = 5;
 var original_scaling = 5;
-var x_pixels = 1280;
-var y_pixels = 720;
+var x_pixels;
+var y_pixels;
 
 var Highscore = 0;
 
@@ -22,6 +29,8 @@ var camera_range;
 var dead = false;
 
 function setup() {
+	x_pixels = displayWidth;
+	y_pixels = displayHeight;
 	createCanvas(x_pixels, y_pixels);
 	frameRate(60);
 	camera_range = [floor(x_pixels/scaling), floor(y_pixels/scaling)];
@@ -35,7 +44,7 @@ function restartGame() {
 		for (j = 0; j < y_pixels; j++) {
 			if (random(1) <= mortal_aliment_ratio) row[j] = new MortalAliment([i,j]);
 			else if (random(1) <= aliment_ratio) row[j] = new Aliment([i,j]);
-			else row[j] = new NoneCell();
+			else row[j] = null;
 		}
 		board[i] = row;
 	}
@@ -53,8 +62,6 @@ function draw() {
 
 	textSize(25);
 	Highscore = max(player.size, Highscore)
-  	text("High Score: "+Highscore, (x_pixels-margin)-60, 25);
-  	text("Size: "+player.size, (x_pixels-margin)-60, 75);
 	strokeWeight(2);
 	line(0,0,0,y_pixels);
 	line(0,0,x_pixels,0);
@@ -65,37 +72,44 @@ function draw() {
 	cam.draw();
 	checkAliments();
 
-	//scaling = original_scaling-(player.size/10);
-	//camera_range = [floor(x_pixels/scaling), floor(y_pixels/scaling)];
+	scaling = max((original_scaling)*(1/((player.size*p_augmenting_factor)/p_original_size)), original_scaling-2.5);
+	console.log(scaling)
+	camera_range = [floor(x_pixels/scaling), floor(y_pixels/scaling)];
+	//game_speed = floor(original_game_speed*(player.size/p_original_size));
+	fill(0,0,0);
+  	text("High Score: "+Highscore, (x_pixels-margin)-150, 25);
+  	text("Size: "+player.size, (x_pixels-margin)-150, 75);
 }
 
 function updatePosition() {
 	dir = getNormalizedDir();
-	player.position[0] += dir[0];
-	player.position[1] += dir[1];
+	//console.log("Direction = "+dir)
+	player.position[0] += floor(dir[0]*game_speed);
+	player.position[1] += floor(dir[1]*game_speed);
 	player.position[0] = min( x_pixels, max(0, player.position[0]));
 	player.position[1] = min( y_pixels, max(0, player.position[1]));
 }
-
-//======================================= UTILITIES ======================================
 
 function checkAliments() {
 	for (var i = cam.position[0]; i < cam.position[0]+camera_range[0]; i++) {
 		for (var j = cam.position[1]; j < cam.position[1]+camera_range[1]; j++) {
 			try {
-				if (board[i][j].type == "Aliment") {
-					if (computeDistance([i,j]) < player.size/2) {
-						aliment = board[i][j]
-						if (aliment.positive) player.size+=aliment.value/10;
-						else player.size-=aliment.value/10;
-						board[i][j] = new NoneCell();
+				//console.log(board[i][j])
+				if (board[i][j] != null) {
+					if (board[i][j].type == "Aliment") {
+						if (computeDistance([i,j]) < player.size/2) {
+							aliment = board[i][j]
+							if (aliment.positive) player.size+=aliment.value/10;
+							else player.size-=aliment.value/10;
+							board[i][j] = null;
+						}
 					}
-				}
-				else if (board[i][j].type == "MortalAliment" & computeDistance([i,j]) < player.size/2) {
-					board[i][j] = new NoneCell();
-					console.log("Ate a MortalAliment")
-					dead = true;
-					return;
+					else if (board[i][j].type == "MortalAliment" & computeDistance([i,j]) < player.size) {
+						board[i][j] = null;
+						console.log("Ate a MortalAliment")
+						dead = true;
+						return;
+					}
 				}
 			}
 			catch {
@@ -107,13 +121,28 @@ function checkAliments() {
 	}
 }
 
+//======================================= UTILITIES ======================================
 
 function getNormalizedDir() {
+	dist_ = computeMouseDistance();
 	screenPos = scope2screen(full2scope(player.position));
 	var mousex = mouseX-screenPos[0];
 	var mousey = mouseY-screenPos[1];
-	if (mousex == 0 || mousey == 0) return [0,0];
-	return [floor(game_speed*(mousex/abs(mousex))), floor(game_speed*(mousey/abs(mousey)))];
+	//console.log("mousex = "+mousex+", mousey = "+mousey);
+	var xmov = floor(mousex/(x_pixels/division_factor));
+	var ymov = floor(mousey/(y_pixels/division_factor));
+
+	if (dist_ < player.size) return [0,0];
+	else if (abs(mousex) < player.size/2) return [0,ymov+(mousey/abs(mousey))];
+	else if (abs(mousey) < player.size/2) return [xmov+(mousex/abs(mousex)), 0];
+	else return [xmov+(mousex/abs(mousex)), ymov+(mousey/abs(mousey))];
+}
+
+function computeMouseDistance() {
+	screenPos = scope2screen(full2scope(player.position));
+	a = mouseX-screenPos[0];
+	b = mouseY-screenPos[1];
+	return sqrt(a*a + b*b);
 }
 
 function computeDistance(alimentPos) {
@@ -146,23 +175,13 @@ class Cell {
 	}
 }
 
-class NoneCell extends Cell {
-	constructor() {
-		super();
-		this.type = "NoneCell";
-	}
-
-	draw() {
-
-	}
-}
 
 class Aliment extends Cell {
 	constructor(position) {
 		super();
 		this.type = "Aliment";
-		this.positive = random(1) <= 0.5;
-		this.value = floor(random(3))+1;
+		this.positive = random(1) <= p_positive_aliment;
+		this.value = floor(random(2))+3;
 		this.color = getRandomColor();
 		this.position = position;
 	}
@@ -194,7 +213,7 @@ class Player extends Cell {
 	constructor() {
 		super();
 		this.type = "Player";
-		this.size = 10;
+		this.size = p_original_size;
 		this.text = "Player";
 		this.color = (0,255,0);
 		this.text_color = (0,0,0);
@@ -221,7 +240,7 @@ class Camera {
 	draw() {
 		for (var i = this.position[0]; i < this.position[0]+camera_range[0]; i++) {
 			for (var j = this.position[1]; j < this.position[1]+camera_range[1]; j++) {
-				board[i][j].draw();
+				if (board[i][j] != null) board[i][j].draw();
 			}
 		}
 		player.draw();
