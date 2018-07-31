@@ -3,13 +3,15 @@ var original_game_speed = 1;
 var game_speed = original_game_speed;
 var board = [];
 var aliment_ratio = 0.0025;
-var mortal_aliment_ratio = 0.000175;
+var mortal_aliment_ratio = 0.000025;
 var margin = 150;
 
 var player;
 var cam;
 
-var division_factor = 4;
+var division_factor = 7;
+
+var aliment_growing_factor = 0.05;
 
 var p_original_size = 10;
 var p_augmenting_factor = 0.5;
@@ -27,6 +29,13 @@ var screenCenter = [x_pixels/2, y_pixels/2];
 var camera_range;
 
 var dead = false;
+
+var cpu_speed = 1.5;
+var cpu_players = [];
+var number_cpu_players = 5;
+var p_random_move = 0.25;
+
+var minimapRes = [192*2,108*2];
 
 function setup() {
 	x_pixels = displayWidth;
@@ -48,6 +57,7 @@ function restartGame() {
 		}
 		board[i] = row;
 	}
+	for (var i = 0; i < number_cpu_players; i++) cpu_players[i] = new CpuPlayer(i);
 	player = new Player();
 	cam = new Camera();
 }
@@ -67,22 +77,23 @@ function draw() {
 	line(0,0,x_pixels,0);
 	line(x_pixels,0,x_pixels,y_pixels);
 	line(0,y_pixels,x_pixels,y_pixels);
+	moveCpu();
 	updatePosition();
 	cam.updatePosition();
 	cam.draw();
-	checkAliments();
+	checkPosition();
 
 	scaling = max((original_scaling)*(1/((player.size*p_augmenting_factor)/p_original_size)), original_scaling-2.5);
-	console.log(scaling)
 	camera_range = [floor(x_pixels/scaling), floor(y_pixels/scaling)];
-	//game_speed = floor(original_game_speed*(player.size/p_original_size));
 	fill(0,0,0);
-  	text("High Score: "+Highscore, (x_pixels-margin)-150, 25);
-  	text("Size: "+player.size, (x_pixels-margin)-150, 75);
+  	text("High Score: "+floor(Highscore), (x_pixels-margin)-150, 25);
+  	text("Size: "+floor(player.size), (x_pixels-margin)-150, 75);
+  	text("Position "+player.position, (x_pixels-margin)-150, 175);
 }
 
 function updatePosition() {
 	dir = getNormalizedDir();
+	text("Direction: "+dir, (x_pixels-margin)-150, 125);
 	//console.log("Direction = "+dir)
 	player.position[0] += floor(dir[0]*game_speed);
 	player.position[1] += floor(dir[1]*game_speed);
@@ -90,32 +101,32 @@ function updatePosition() {
 	player.position[1] = min( y_pixels, max(0, player.position[1]));
 }
 
-function checkAliments() {
+function checkPosition() {
+	for (var i = 0; i < number_cpu_players; i++) {
+		var cpuPos = cpu_players[i].position;
+		if (computeDistance([cpuPos[0], cpuPos[1]]) < player.size/2) {
+			dead = true;
+				return;
+		}
+	}
 	for (var i = cam.position[0]; i < cam.position[0]+camera_range[0]; i++) {
 		for (var j = cam.position[1]; j < cam.position[1]+camera_range[1]; j++) {
-			try {
-				//console.log(board[i][j])
-				if (board[i][j] != null) {
-					if (board[i][j].type == "Aliment") {
-						if (computeDistance([i,j]) < player.size/2) {
-							aliment = board[i][j]
-							if (aliment.positive) player.size+=aliment.value/10;
-							else player.size-=aliment.value/10;
-							board[i][j] = null;
-						}
-					}
-					else if (board[i][j].type == "MortalAliment" & computeDistance([i,j]) < player.size) {
+			//console.log(board[i][j])
+			if (board[i][j] != null) {
+				if (board[i][j].type == "Aliment") {
+					if (computeDistance([i,j]) < player.size/2) {
+						aliment = board[i][j]
+						if (aliment.positive) player.size+=aliment.value*aliment_growing_factor;
+						else player.size-=aliment.value*aliment_growing_factor;
 						board[i][j] = null;
-						console.log("Ate a MortalAliment")
-						dead = true;
-						return;
 					}
 				}
-			}
-			catch {
-				console.log("cam pos = "+cam.position)
-				console.log([i,j])
-				//console.log(board)
+				else if (board[i][j].type == "MortalAliment" & computeDistance([i,j]) < player.size/2) {
+					board[i][j] = null;
+					console.log("Ate a MortalAliment")
+					dead = true;
+					return;
+				}
 			}
 		}
 	}
@@ -128,14 +139,52 @@ function getNormalizedDir() {
 	screenPos = scope2screen(full2scope(player.position));
 	var mousex = mouseX-screenPos[0];
 	var mousey = mouseY-screenPos[1];
-	//console.log("mousex = "+mousex+", mousey = "+mousey);
+
 	var xmov = floor(mousex/(x_pixels/division_factor));
 	var ymov = floor(mousey/(y_pixels/division_factor));
 
+	if (xmov < 0) xmov +=1;
+	if (ymov < 0) ymov +=1;	
+
+	var xsign = mousex/abs(mousex);
+	var ysign = mousey/abs(mousey);
+
 	if (dist_ < player.size) return [0,0];
-	else if (abs(mousex) < player.size/2) return [0,ymov+(mousey/abs(mousey))];
-	else if (abs(mousey) < player.size/2) return [xmov+(mousex/abs(mousex)), 0];
-	else return [xmov+(mousex/abs(mousex)), ymov+(mousey/abs(mousey))];
+	else if (abs(mousex) < player.size) return [0,ymov+ysign];
+	else if (abs(mousey) < player.size) return [xmov+xsign, 0];
+	else return [xmov+xsign, ymov+ysign];
+}
+
+function sign(x) {
+	if (x < 0) return -1;
+	else return 1;
+}
+
+function moveCpu() {
+	screenPos = player.position;
+	for (var i = 0; i < number_cpu_players; i++) {
+		if (random(1) < p_random_move) {
+			var dir = [floor(random(3)), floor(random(3))];
+		}
+		else {
+			var cpuPos = cpu_players[i].position;
+			var diffx = screenPos[0]-cpuPos[0];
+			var diffy = screenPos[1]-cpuPos[1];
+
+			var xdir = sign(diffx);
+			var ydir = sign(diffy);
+
+			var xmov = min(cpu_speed, abs(diffx))*xdir;
+			var ymov = min(cpu_speed, abs(diffy))*ydir;
+			var dir = [xmov, ymov];
+		}
+
+		cpu_players[i].position[0] += floor(dir[0]);
+		cpu_players[i].position[1] += floor(dir[1]);
+		cpu_players[i].position[0] = min( x_pixels, max(0, cpu_players[i].position[0]));
+		cpu_players[i].position[1] = min( y_pixels, max(0, cpu_players[i].position[1]));
+		text("CPU "+i+" at distance: "+floor(computeDistance(cpu_players[i].position)), (x_pixels-margin)-150, 225+50*i)
+	} 
 }
 
 function computeMouseDistance() {
@@ -161,6 +210,16 @@ function full2scope(pos) {
 
 function scope2screen(pos) {
 	return [pos[0]*scaling, pos[1]*scaling];
+}
+
+function screen2mini(pos) {
+	return [ floor((pos[0]/x_pixels)*minimapRes[0]), floor((pos[1]/y_pixels)*minimapRes[1]) ];
+}
+
+function size2mini(size) {
+	avgSize = (x_pixels+y_pixels)/2;
+	avgMini = (minimapRes[0]+minimapRes[1])/2;
+	return (size/avgSize)*avgMini;
 }
 
 //======================================= CELL CLASSES ======================================
@@ -227,6 +286,22 @@ class Player extends Cell {
 	}
 }
 
+class CpuPlayer extends Cell {
+	constructor(id) {
+		super();
+		this.id = id;
+		this.type = "CpuPlayer";
+		this.size = p_original_size;
+		this.position = [floor(random(1)*x_pixels), floor(random(1)*y_pixels)];
+	}
+
+	draw() {
+		fill(255,255,0);
+		var screenPos = scope2screen(full2scope(this.position));
+		ellipse(screenPos[0], screenPos[1], this.size*scaling, this.size*scaling);
+	}
+}
+
 //======================================= CAMERA CLASSES ======================================
 
 class Camera {
@@ -234,7 +309,6 @@ class Camera {
 		this.position = [player.position[0] - floor(camera_range[0]/2), 
 							player.position[1] - floor(camera_range[1]/2)] ; //top left corner
 		this.range = camera_range;
-		this.target = target;
 	}
 
 	draw() {
@@ -243,7 +317,18 @@ class Camera {
 				if (board[i][j] != null) board[i][j].draw();
 			}
 		}
+		for (var i = 0; i < number_cpu_players; i++) cpu_players[i].draw();
 		player.draw();
+		fill(255,255,255);
+		rect(0,0,minimapRes[0],minimapRes[1]);
+		var miniPlayer = screen2mini(player.position);
+		fill(0,0,255);
+		ellipse(miniPlayer[0], miniPlayer[1], size2mini(player.size), size2mini(player.size));
+		fill(255,255,0);
+		for (var i = 0; i < number_cpu_players; i++) {
+			var miniCpu = screen2mini(cpu_players[i].position);
+			ellipse(miniCpu[0], miniCpu[1], size2mini(cpu_players[i].size), size2mini(cpu_players[i].size));
+		}
 	}
 
 	updatePosition() {
